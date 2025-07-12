@@ -1,0 +1,114 @@
+# ============================================================================
+# SyntaxRAG Production Docker Compose
+# ============================================================================
+# This docker-compose file sets up the complete SyntaxRAG recall agent system
+# with PostgreSQL database and the MCP server.
+#
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # PostgreSQL database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: syntaxrag-db
+    environment:
+      POSTGRES_DB: agent_recall
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_recall_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init_docker_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    networks:
+      - syntaxrag-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent_recall"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # SyntaxRAG MCP Server
+  syntaxrag-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syntaxrag-server
+    environment:
+      # Database configuration
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: agent_recall
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_recall_password}
+      
+      # OpenAI configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
+      
+      # Server configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH:-16777216}
+      
+      # Optional: LangSmith tracing
+      LANGSMITH_TRACING_V2: ${LANGSMITH_TRACING_V2:-false}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-SyntaxRAG}
+    ports:
+      - "${SYNTAXRAG_PORT:-8000}:8000"
+    networks:
+      - syntaxrag-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    volumes:
+      - syntaxrag_logs:/app/logs
+      - syntaxrag_data:/app/data
+
+  # Optional: Nginx reverse proxy for production
+  nginx:
+    image: nginx:alpine
+    container_name: syntaxrag-nginx
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - syntaxrag_logs:/var/log/syntaxrag:ro
+    networks:
+      - syntaxrag-network
+    depends_on:
+      - syntaxrag-server
+    restart: unless-stopped
+    profiles:
+      - production
+
+networks:
+  syntaxrag-network:
+    driver: bridge
+    name: syntaxrag-network
+
+volumes:
+  postgres_data:
+    name: syntaxrag-postgres-data
+  syntaxrag_logs:
+    name: syntaxrag-logs
+  syntaxrag_data:
+    name: syntaxrag-data
