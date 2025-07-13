@@ -12,4 +12,6 @@ dependencies = [
     "pgvector>=0.2.0",
     "numpy>=1.24.0",
     "typing-extensions>=4.5.0",
+    "fastapi>=0.116.1",
+    "fastmcp>=2.10.5",
 ]

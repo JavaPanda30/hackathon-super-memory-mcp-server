@@ -1,90 +1,108 @@
-import asyncio
-import uvicorn
-from datetime import datetime
 from fastmcp import FastMCP
-from tools.summarize_and_store import SummarizeAndStoreTool
-from tools.fetch_context import FetchContextTool
-from fastapi import FastAPI
-from datetime import datetime
+import os
 
-# Create the MCP instance
+# Set default environment settings for server behavior
+os.environ.setdefault("UVICORN_TIMEOUT_KEEP_ALIVE", "300")
+os.environ.setdefault("UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN", "60")
+
+# Initialize FastMCP instance
 mcp = FastMCP("syntaxrag")
 
-# Tool 1: Summarize chat and store as memory
+# — Prompts to trigger tools —
+
+@mcp.prompt(name="run_summarize")
+def run_summarize_prompt() -> str:
+    return (
+        "Call the tool 'summarize_chat_and_add_to_memory' "
+        "with input_data={'chat_log': <CHAT_LOG>, 'context': '', 'tags': [], 'metadata': {}}."
+    )
+
+@mcp.prompt(name="run_context")
+def run_context_prompt() -> str:
+    return (
+        "Call the tool 'fetch_relevant_context_from_memories' with:\n"
+        "- input_data.query: a description of what you're searching for\n"
+        "- input_data.filters.keywords: a list of specific keywords\n"
+        "- input_data.limit: optional, defaults to 5\n\n"
+        "**Example call:**\n"
+        "{\n"
+        "  \"tool\": \"fetch_relevant_context_from_memories\",\n"
+        "  \"input_data\": {\n"
+        "    \"query\": \"Find discussions about latency issues\",\n"
+        "    \"filters\": {\"keywords\": [\"latency\", \"performance\"]},\n"
+        "    \"limit\": 3\n"
+        "  }\n"
+        "}"
+    )
+
+@mcp.prompt(
+    name="run_pr_analysis",
+    description="Prompt to initiate GitHub PR analysis using the dedicated tool"
+)
+def run_pr_analysis_prompt() -> str:
+    return """\
+You are about to analyze a set of GitHub pull requests.
+
+Please call the **github mcp tools** by providing:
+- `pr_numbers`: a list of PR IDs to analyze (e.g. [123, 456, 789]).
+
+The tool will fetch each PRs details—for example, the title, author, status, diff stats, and review comments—then return a summarized analysis comparing patterns, major changes, review feedback, and intents.
+
+**Instruction:**  
+Call the tool exactly like this:
+```json
+{
+  "tool": <relevant tool from github mcp tools>,
+  "input_data": {
+    "pr_numbers": <PR_NUMBERS_LIST>
+  }
+}
+```"""
+
+# — Tools to be invoked by the prompts —
+
 @mcp.tool()
 def summarize_chat_and_add_to_memory(input_data: dict):
-    """
-    Summarize a chat log and store it as a memory in the database.
-    
-    Args:
-        input_data: Dictionary containing:
-            - chat_log: List of strings representing chat messages (required)
-            - context: Optional context about the conversation
-            - tags: Optional list of tags for categorization
-            - metadata: Optional metadata dictionary
-    
-    Returns:
-        Dictionary containing:
-            - heading: Generated heading for the conversation
-            - summary: Detailed summary of meaningful changes
-            - memory_id: ID of stored memory
-            - success: Boolean indicating success
-            - error: Error message if failed
-    """
-    return SummarizeAndStoreTool().run(input_data)
+    """This tool takes a raw chat log or conversation text and generates a summary.
 
-# Tool 2: Fetch relevant context from stored memories
+It is primarily used to:
+- Condense long multi-turn chats into brief bullet points or a paragraph.
+- Add metadata, tags, and contextual information.
+- Store the summary and metadata into memory for later retrieval by context-aware agents or workflows.
+
+**Input Fields:**
+- `chat_log` (str, required): The full text of the conversation to summarize.
+- `context` (str, optional): Optional description of where or why this chat occurred (e.g., "sprint planning").
+- `tags` (list[str], optional): Keywords for categorizing the memory.
+- `metadata` (dict, optional): Any additional metadata such as user, timestamp, etc.
+"""
+    try:
+        from tools.summarize_and_store import SummarizeAndStoreTool
+        return SummarizeAndStoreTool().run(input_data)
+    except Exception as e:
+        return {"error": f"Failed to run summarize tool: {str(e)}"}
+
 @mcp.tool()
 def fetch_relevant_context_from_memories(input_data: dict):
-    """
-    Fetch relevant memories based on query and filters.
-    
-    Args:
-        input_data: Dictionary containing:
-            - query: Search query string (required)
-            - limit: Maximum number of results (default: 5)
-            - similarity_threshold: Minimum similarity score (default: 0.1)
-            - date_filter: Optional date filter
-    
-    Returns:
-        Dictionary containing:
-            - results: List of matching memories with similarity scores
-            - query: Original query
-            - success: Boolean indicating success
-            - error: Error message if failed
-    """
-    return FetchContextTool().run(input_data)
+    """This tool searches a memory store (such as chat summaries, meeting notes, or system logs)
+to retrieve entries relevant to a given query, based on specific keyword filters.
 
-# Health endpoint for Docker health checks
-@mcp.get("/health")
-def health_check():
-    """Health check endpoint for monitoring and Docker health checks."""
+### Use Cases:
+- Retrieve past conversations related to a technical issue (e.g., "database latency").
+- Surface related discussions before responding to a question or prompt.
+- Provide agents with historical context to enhance answers or decisions.
+
+### Input Format:
+- `query` (str, required): A free-text string that describes the topic or intent you're searching for. Used for semantic/contextual matching.
+- `filters.keywords` (list[str], required): Keywords that must appear in the memory summary or tags for a match to be considered. These are exact substring filters (not embeddings).
+- `limit` (int, optional): Max number of matching memory entries to return. Default is 5.
+"""
     try:
-        # Quick database connection test
-        from core.postgres_store import PostgresStore
-        store = PostgresStore()
-        stats = store.get_stats()
-        store.close()
-        
-        return {
-            "status": "healthy",
-            "service": "SyntaxRAG MCP Server",
-            "database": "connected",
-            "total_memories": stats.get("total_memories", 0),
-            "timestamp": datetime.now().isoformat()
-        }
+        from tools.fetch_context import FetchContextTool
+        return FetchContextTool().run(input_data)
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "service": "SyntaxRAG MCP Server", 
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+        return {"error": f"Failed to fetch context: {str(e)}"}
+
 
 if __name__ == "__main__":
-    # Set environment variables for longer timeouts
-    import os
-    os.environ.setdefault("UVICORN_TIMEOUT_KEEP_ALIVE", "300")  # 5 minutes
-    os.environ.setdefault("UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN", "60")  # 1 minute
-    
-    mcp.run()
+    mcp.run(transport="http", host="0.0.0.0", port=8000)

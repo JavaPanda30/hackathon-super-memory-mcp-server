@@ -23,6 +23,7 @@ set -e  # Exit on error
 DEFAULT_IMAGE_NAME="syntaxrag"
 DEFAULT_VERSION="latest"
 DEFAULT_PLATFORM="linux/amd64"
+DOCKERHUB_IMAGE_NAME="suyashtaza/super-memory-mcp"
 
 # Colors for output
 RED='\033[0;31m'
@@ -65,6 +66,7 @@ show_usage() {
     echo "  --build-only        Only build the image locally"
     echo "  --save              Build and save image to tar file"
     echo "  --registry REGISTRY Push to specified registry (e.g., docker.io/username, ghcr.io/username)"
+    echo "  --push-dockerhub    Push to Docker Hub as suyashtaza/super-memory-mcp"
     echo "  --version VERSION   Tag with specific version (default: latest)"
     echo "  --platform PLATFORM Build for specific platform (default: linux/amd64)"
     echo "  --multi-arch        Build for multiple architectures (amd64, arm64)"
@@ -74,6 +76,7 @@ show_usage() {
     echo "  $0 --build-only                                    # Build locally only"
     echo "  $0 --save --version v1.0.0                         # Build and save to tar file"
     echo "  $0 --registry docker.io/username --version v1.0.0  # Build and push to Docker Hub"
+    echo "  $0 --push-dockerhub --version v1.0.0               # Build and push to suyashtaza/super-memory-mcp"
     echo "  $0 --registry ghcr.io/username --multi-arch        # Build multi-arch and push to GitHub"
     echo ""
 }
@@ -238,6 +241,7 @@ main() {
     local platform="$DEFAULT_PLATFORM"
     local multi_arch=false
     local image_name="$DEFAULT_IMAGE_NAME"
+    local push_dockerhub=false
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -253,6 +257,10 @@ main() {
             --registry)
                 registry="$2"
                 shift 2
+                ;;
+            --push-dockerhub)
+                push_dockerhub=true
+                shift
                 ;;
             --version)
                 version="$2"
@@ -302,6 +310,11 @@ main() {
         save_image "$image_name" "$version"
     fi
     
+    # Push to Docker Hub shortcut
+    if [ "$push_dockerhub" = true ]; then
+        push_to_registry "$image_name" "$version" "$DOCKERHUB_IMAGE_NAME" "$multi_arch"
+    fi
+
     if [ -n "$registry" ]; then
         push_to_registry "$image_name" "$version" "$registry" "$multi_arch"
     fi

@@ -1,48 +1,40 @@
-# Use Python 3.11 slim image as base
+# Use a minimal Python 3.11 base image
 FROM python:3.11-slim
 
 # Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PATH="/home/syntaxrag/.local/bin:$PATH"
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libpq-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash syntaxrag
+
+# Set working directory and adjust permissions
 WORKDIR /app
+COPY . /app
+RUN chown -R syntaxrag:syntaxrag /app
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash syntaxrag && \
-    chown -R syntaxrag:syntaxrag /app
+# Switch to non-root user
 USER syntaxrag
 
-# Copy requirements first for better caching
+# Copy only requirements for caching
 COPY --chown=syntaxrag:syntaxrag requirements.txt pyproject.toml ./
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --user -r requirements.txt
 
-# Copy application code
-COPY --chown=syntaxrag:syntaxrag . .
-
-# Create necessary directories
-RUN mkdir -p logs data
-
-# Add user's pip bin to PATH
-ENV PATH="/home/syntaxrag/.local/bin:$PATH"
-
-# Expose port for MCP server
+# Expose MCP port only
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Default command
-CMD ["python", "mcp_server.py", "--host", "0.0.0.0", "--port", "8000"]
+# Run the MCP server
+CMD ["python", "mcp_server.py"]

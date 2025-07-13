@@ -180,19 +180,29 @@ Provide:
     
     def _store_memory(self, heading: str, summary: str, embedding: List[float], 
                      tags: List[str], metadata: Dict[str, Any]) -> str:
-        """Store the memory in PostgreSQL."""
+        """Store the memory, tags, and metadata in PostgreSQL."""
         try:
             store = PostgresStore()
-            
             # Store the memory in PostgreSQL
             memory_id = store.store_memory(
                 heading=heading,
                 summary=summary,
                 embedding=embedding
             )
-            logger.info(f"Stored memory with ID: {memory_id}")
+            # Store tags
+            for tag in tags:
+                try:
+                    store.add_tag(memory_id, tag)
+                except Exception as tag_err:
+                    logger.warning(f"Failed to store tag '{tag}' for memory {memory_id}: {tag_err}")
+            # Store metadata
+            for key, value in metadata.items():
+                try:
+                    store.add_metadata(memory_id, key, value)
+                except Exception as meta_err:
+                    logger.warning(f"Failed to store metadata '{key}' for memory {memory_id}: {meta_err}")
+            logger.info(f"Stored memory with ID: {memory_id}, tags: {tags}, metadata: {metadata}")
             return memory_id
-            
         except Exception as e:
             logger.error(f"Failed to store memory: {e}")
             raise

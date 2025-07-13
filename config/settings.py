@@ -11,7 +11,6 @@ class Settings:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     models = client.models.list()
-    print([m.id for m in models.data])
     
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
     
@@ -30,7 +29,7 @@ class Settings:
         "port": POSTGRES_PORT,
         "user": POSTGRES_USER,
         "password": POSTGRES_PASSWORD,
-        "database": POSTGRES_DB,
+        "dbname": POSTGRES_DB,
     }
     # System Configuration
     MAX_CHAT_LENGTH = int(os.getenv("MAX_CHAT_LENGTH", "50000"))
